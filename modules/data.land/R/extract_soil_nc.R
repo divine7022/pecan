@@ -46,29 +46,44 @@ extract_soil_gssurgo<-function(outdir, lat, lon, size=1, radius=500, depths=c(0.
     "&OUTPUTFORMAT=XMLMukeyList"
   )
   
+  # XML handling with temp file
+  temp_file <- tempfile(fileext = ".xml")
   xmll <- curl::curl_download(
     mu.Path,
-    ssl.verifyhost = FALSE,
-    ssl.verifypeer = FALSE)
-
-  mukey_str <- XML::xpathApply(
-    doc = XML::xmlParse(xmll),
-    path = "//MapUnitKeyList",
-    fun = XML::xmlValue)
+    destfile = temp_file,
+    handle = curl::new_handle(ssl_verifypeer = FALSE, ssl_verifyhost = FALSE)
+  )
+  
+  # mukey extraction with error recovery
+  mukey_str <- tryCatch({
+    result <- XML::xpathApply(
+      doc = XML::xmlParse(temp_file),
+      path = "//MapUnitKeyList",
+      fun = XML::xmlValue)
+    if (is.list(result)) result[[1]] else result
+  }, error = function(e) {
+    xml_doc <- XML::xmlParse(temp_file)
+    all_text <- XML::xpathSApply(xml_doc, "//text()", XML::xmlValue)
+    mukey_candidates <- all_text[grepl("^[0-9,]+$", all_text)]
+    if (length(mukey_candidates) > 0) mukey_candidates[1] else NULL
+  })
+  if (file.exists(temp_file)) unlink(temp_file)
+  
   mukeys <- strsplit(mukey_str, ",")[[1]]
-
   if (length(mukeys) == 0) {
-    PEcAn.logger::logger.error("No mapunit keys were found for this site.")
+    PEcAn.logger::logger.severe("No mapunit keys were found for this site.")
+    return(NULL)
   }
-
   # calling the query function sending the mapunit keys
   soilprop <- gSSURGO.Query(
     mukeys,
     c("chorizon.sandtotal_r",
       "chorizon.silttotal_r",
       "chorizon.claytotal_r",
-      "chorizon.hzdept_r"))
-
+      "chorizon.hzdept_r",
+      "chorizon.hzdepb_r",  
+      "chorizon.om_r",      
+      "chorizon.dbthirdbar_r")) 
   soilprop.new <- soilprop %>%
     dplyr::arrange(.data$hzdept_r) %>%
     dplyr::select(
@@ -76,19 +91,33 @@ extract_soil_gssurgo<-function(outdir, lat, lon, size=1, radius=500, depths=c(0.
       fraction_of_silt_in_soil = "silttotal_r",
       fraction_of_clay_in_soil = "claytotal_r",
       soil_depth = "hzdept_r",
+      soil_depth_bottom = "hzdepb_r",
+      organic_matter_pct = "om_r",
+      bulk_density = "dbthirdbar_r",
       mukey = "mukey") %>%
-    dplyr::mutate(dplyr::across(
-        c(dplyr::starts_with("fraction_of"),
-          "soil_depth"),
-        function(x) x / 100))
-
-  soilprop.new <- soilprop.new[ stats::complete.cases(soilprop.new) , ]
+    dplyr::mutate(
+      dplyr::across(c(dplyr::starts_with("fraction_of"), "soil_depth", "soil_depth_bottom"), 
+                    ~ as.numeric(.) / 100),
+      horizon_thickness_m = soil_depth_bottom - soil_depth,
+      # Van Bemmelen factor conversion: OM to SOC
+      soc_percent = organic_matter_pct / 1.724,  
+      soil_organic_carbon_stock = horizon_thickness_m * (soc_percent / 100) * bulk_density * 10
+    ) %>%
+    dplyr::filter(stats::complete.cases(.))
+  if(nrow(soilprop.new) == 0) {
+    PEcAn.logger::logger.error("No valid soil properties after filtering")
+    return(NULL)
+  } 
+  if(!dir.exists(outdir)) dir.create(outdir, recursive = TRUE)
+  
   #converting it to list
-  soil.data.gssurgo <- names(soilprop.new)[1:4] %>%
-    purrr::map(function(var) {
-      soilprop.new[, var]
-    }) %>%
-    stats::setNames(names(soilprop.new)[1:4])
+  soil.data.gssurgo <- list(
+    fraction_of_sand_in_soil = as.numeric(soilprop.new$fraction_of_sand_in_soil),
+    fraction_of_silt_in_soil = as.numeric(soilprop.new$fraction_of_silt_in_soil),
+    fraction_of_clay_in_soil = as.numeric(soilprop.new$fraction_of_clay_in_soil),
+    soil_depth = as.numeric(soilprop.new$soil_depth),
+    soil_organic_carbon_stock = as.numeric(soilprop.new$soil_organic_carbon_stock)
+  )
   #This ensures that I have at least one soil ensemble in case the modeling part failed
   all.soil.ens <-c(all.soil.ens, list(soil.data.gssurgo))
   
@@ -97,14 +126,17 @@ extract_soil_gssurgo<-function(outdir, lat, lon, size=1, radius=500, depths=c(0.
   #- see if we need to generate soil ensemble and add that to the list of all
   tryCatch({
     # find the soil depth levels based on the depth argument 
-    # if soil profile is deeper than what is specified in the argument then I go as deep as the soil profile.
-    if (max(soilprop.new$soil_depth) > max(depths)) depths <- sort (c(depths, max(max(soilprop.new$soil_depth))))
+    # if soil profile is deeper than what is specified in the argument then i go as deep as the soil profile.
+    current_max_depth <- max(soilprop.new$soil_depth, na.rm = TRUE)
+    if (!is.na(current_max_depth) && current_max_depth > max(depths)) {
+      depths <- sort(c(depths, current_max_depth))
+    }
     
     depth.levs<-findInterval(soilprop.new$soil_depth, depths)
     depth.levs[depth.levs==0] <-1
     depth.levs[depth.levs>length(depths)] <-length(depths)
     
-     soilprop.new.grouped<-soilprop.new %>% 
+    soilprop.new.grouped<-soilprop.new %>% 
       dplyr::mutate(DepthL=depths[depth.levs])
     
     # let's fit dirichlet for each depth level separately
@@ -120,45 +152,60 @@ extract_soil_gssurgo<-function(outdir, lat, lon, size=1, radius=500, depths=c(0.
           alpha <- dir.model$alpha
           alpha <- matrix(alpha, nrow= size, ncol=length(alpha), byrow=TRUE )
           simulated.soil <- sirt::dirichlet.simul(alpha)
-          # # using the simulated sand/silt/clay to generate soil ensemble
+          
+          # Simulate SOC uncertainty using Gamma distribution to ensure positive values
+          soc_mean <- mean(DepthL.Data$soil_organic_carbon_stock, na.rm = TRUE)
+          soc_sd <- stats::sd(DepthL.Data$soil_organic_carbon_stock, na.rm = TRUE)
+          if (!is.na(soc_sd) && soc_sd > 0) {
+            shape <- (soc_mean^2) / (soc_sd^2)
+            rate <- soc_mean / (soc_sd^2)
+            simulated_soc <- pmax(stats::rgamma(size, shape=shape, rate=rate), 0)
+          } else {
+            simulated_soc <- rep(soc_mean, size)
+          }
+          
           simulated.soil<-simulated.soil %>%
             as.data.frame %>%
             dplyr::mutate(DepthL=rep(DepthL.Data[1,6], size),
-                   mukey=rep(DepthL.Data[1,5], size)) %>%
+                   mukey=rep(DepthL.Data[1,5], size),
+                   soil_organic_carbon_stock = simulated_soc) %>%
             `colnames<-`(c("fraction_of_sand_in_soil",
                            "fraction_of_silt_in_soil",
                            "fraction_of_clay_in_soil",
                            "soil_depth",
-                           "mukey"))
+                           "mukey",
+                           "soil_organic_carbon_stock"))
           simulated.soil
         },
         error = function(e) {
           PEcAn.logger::logger.warn(conditionMessage(e))
           return(NULL)
         })
-        
       }) 
     
     # estimating the proportion of areas for those mukeys which are modeled
+    mukey_area <- data.frame(
+      mukeys = unique(simulated.soil.props$mukey),
+      Area = rep(1/length(unique(simulated.soil.props$mukey)), 
+                length(unique(simulated.soil.props$mukey)))
+    ) 
     mukey_area <- mukey_area %>%
-      dplyr::filter(mukeys %in% simulated.soil.props$mukey) %>%
-      dplyr::mutate(Area=.data$Area/sum(.data$Area))
-    
+  dplyr::filter(mukeys %in% simulated.soil.props$mukey) %>%
+  dplyr::mutate(Area = Area/sum(Area))
     #--- Mixing the depths
     soil.profiles<-simulated.soil.props %>% 
       split(.$mukey)%>% 
       purrr::map(function(soiltype.sim){
-        sizein <- (mukey_area$Area[ mukey_area$mukey == soiltype.sim$mukey %>% unique()])*size
+        sizein <- (mukey_area$Area[mukey_area$mukey == unique(soiltype.sim$mukey)])*size
         
         1:ceiling(sizein) %>%
           purrr::map(function(x){
             soiltype.sim %>% 
               split(.$soil_depth)%>%
-              purrr::map_dfr(~.x[x,])
+              purrr::map_dfr(~.x[min(x, nrow(.x)),])
           })
       }) %>%
       purrr::flatten()
-
     #- add them to the list of all the ensembles ready to be converted to .nc file
     all.soil.ens<-soil.profiles %>%
       purrr::map(function(SEns){
@@ -187,16 +234,14 @@ extract_soil_gssurgo<-function(outdir, lat, lon, size=1, radius=500, depths=c(0.
         new.file <- file.path(outdir, paste0(prefix, ".nc"))
         #sending it to the func where some new params will be added and then it will be written down as nc file.
         suppressWarnings({
-          soil2netcdf(all.soil.ens[[i]][1:4], new.file)
+          soil2netcdf(all.soil.ens[[i]], new.file)
         })
-        
         new.file
       },
       error = function(e) {
         PEcAn.logger::logger.warn(conditionMessage(e))
         return(NULL)
       })
-      
     })
   # removing the nulls or the ones that throw exception in the above trycatch
   out.ense<- out.ense %>%
@@ -207,6 +252,7 @@ extract_soil_gssurgo<-function(outdir, lat, lon, size=1, radius=500, depths=c(0.
   
   return(out.ense)
 }
+
 
 
 
@@ -382,7 +428,12 @@ soil.units <- function(varname = NA){
                                       "soil_thermal_conductivity","W m-1 K-1", 
                                       "soil_thermal_conductivity_at_saturation","W m-1 K-1", 
                                       "soil_thermal_capacity","J kg-1 K-1",
-                                      "soil_albedo","1"
+                                      "soil_albedo","1",
+                                      "slpotwp","m",
+                                      "slpotcp","m",
+                                      "slcpd","J m-3 K-1",
+                                      "slden","kg m-3",
+                                      "soil_organic_carbon_stock","kg m-2"
   ),
   ncol=2,byrow = TRUE))
   colnames(variables) <- c('var','unit')
