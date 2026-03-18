@@ -42,7 +42,7 @@ Imports:
     purrr,
     randtoolbox,
     rlang,
-    sensitivity
+    sensobol
 Suggests:
     testthat (>= 1.0.2),
     mockery
