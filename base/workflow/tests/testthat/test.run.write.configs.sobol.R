@@ -1,5 +1,3 @@
-library(testthat)
-
 test_that("runModule.run.write.configs uses input_design row count", {
   settings <- PEcAn.settings::Settings(
     ensemble = list(
