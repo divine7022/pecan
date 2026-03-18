@@ -4,24 +4,49 @@
 #' are shared across sites to ensure consistent parameter sampling.
 #'
 #' @param settings A PEcAn settings object containing ensemble configuration
-#' @param ensemble_size Integer specifying the number of ensemble members
-#' Since the `input_design` will only be generated once for the entire model run,
-#' the only situation, where we might want to recycle the existing `ensemble_samples`,
-#' is when we split and submit the larger SDA runs (e.g., 8,000 sites) into 
-#' smaller SDA experiments (e.g., 100 sites per job), where we want to keep using 
-#' the same parameters rather than creating new parameters for each job.
-#' @param sobol for activating sobol
-#' @return  A list containing ensemble samples and indices
-#'   If `sobol = TRUE`, the list will be a `sensitivity::soboljansen()` 
-#'   result and will contain the components documented therein.
+#' @param ensemble_size Integer specifying the number of ensemble members.
+#'   When `sobol = TRUE`, this is the Sobol base sample size `N`, not the
+#'   expanded number of model runs.
+#' @param sobol Logical, generate a variance-based Sobol design using
+#'   `sensobol`.
+#' @return A list with component `X`, a data frame design matrix describing
+#'   PEcAn parameter and sampled-input indices. If `sobol = TRUE`, the list
+#'   also includes the metadata needed by `compute_sobol_indices()`.
 #' @export
+
+.sobol_parameter_bank_size <- function(samples_file) {
+  if (!file.exists(samples_file)) {
+    return(0L)
+  }
+
+  samples <- new.env(parent = emptyenv())
+  load(samples_file, envir = samples)
+
+  if (is.null(samples$trait.samples) || length(samples$trait.samples) == 0) {
+    return(0L)
+  }
+
+  first_pft <- samples$trait.samples[[1]]
+  if (is.null(first_pft) || length(first_pft) == 0) {
+    return(0L)
+  }
+
+  first_trait <- first_pft[[1]]
+  if (is.null(first_trait)) {
+    return(0L)
+  }
+
+  return(as.integer(length(first_trait)))
+}
+
+.map_sobol_to_indices <- function(x, size) {
+  indices <- floor(stats::qunif(x, min = 1, max = size + 1))
+  as.integer(pmin(indices, size))
+}
 
 generate_joint_ensemble_design <- function(settings,
                                            ensemble_size,
                                            sobol = FALSE) {
-  if (sobol) {
-    ensemble_size <- as.numeric(ensemble_size) * 2
-  }
   ens.sample.method <- settings$ensemble$samplingspace$parameters$method
   design_list <- list()
   sampled_inputs <- list()
@@ -34,6 +59,99 @@ generate_joint_ensemble_design <- function(settings,
       unlist()
   ]
   samp.ordered <- samp[c(order, names(samp)[!(names(samp) %in% order)])]
+
+  if (sobol) {
+    sobol_factors <- c(
+      "param",
+      names(samp.ordered)[
+        names(samp.ordered) != "parameters" &
+          vapply(
+            samp.ordered,
+            function(x) is.null(x$parent),
+            logical(1)
+          )
+      ]
+    )
+
+    total_runs <- as.integer(ensemble_size) * (length(sobol_factors) + 2L)
+    samples_file <- file.path(settings$outdir, "samples.Rdata")
+    if (.sobol_parameter_bank_size(samples_file) < total_runs) {
+      PEcAn.uncertainty::get.parameter.samples(
+        settings = settings,
+        ensemble.size = total_runs,
+        posterior.files = posterior.files,
+        ens.sample.method = ens.sample.method
+      )
+    }
+
+    sobol_design <- sensobol::sobol_matrices(
+      matrices = c("A", "B", "AB"),
+      N = as.integer(ensemble_size),
+      params = sobol_factors,
+      order = "first",
+      type = "QRN"
+    )
+    sobol_design <- as.data.frame(sobol_design)
+
+    sobol_indices <- list()
+    sobol_indices[["param"]] <- .map_sobol_to_indices(
+      sobol_design[["param"]],
+      total_runs
+    )
+
+    for (input_tag in setdiff(sobol_factors, "param")) {
+      input_paths <- settings$run$inputs[[tolower(input_tag)]]$path
+      sobol_indices[[input_tag]] <- .map_sobol_to_indices(
+        sobol_design[[input_tag]],
+        length(input_paths)
+      )
+    }
+
+    for (i in seq_along(samp.ordered)) {
+      input_tag <- names(samp.ordered)[i]
+
+      if (identical(input_tag, "parameters")) {
+        next
+      }
+
+      parent_name <- samp.ordered[[i]]$parent
+      if (!is.null(parent_name)) {
+        input_result <- PEcAn.uncertainty::input.ens.gen(
+          settings = settings,
+          ensemble_size = total_runs,
+          input = input_tag,
+          method = samp.ordered[[i]]$method,
+          parent_ids = sampled_inputs[[parent_name]]
+        )
+        sampled_inputs[[input_tag]] <- input_result
+        design_list[[input_tag]] <- input_result$ids
+      } else if (input_tag %in% names(sobol_indices)) {
+        sampled_inputs[[input_tag]] <- list(ids = sobol_indices[[input_tag]])
+        design_list[[input_tag]] <- sobol_indices[[input_tag]]
+      }
+    }
+
+    design_list[["param"]] <- sobol_indices[["param"]]
+    design_matrix <- data.frame(design_list)
+
+    factor_metadata <- data.frame(
+      factor = sobol_factors,
+      source_type = sobol_factors,
+      source_tag = ifelse(sobol_factors == "param", NA_character_, sobol_factors),
+      stringsAsFactors = FALSE
+    )
+
+    return(list(
+      X = design_matrix,
+      N = as.integer(ensemble_size),
+      params = sobol_factors,
+      backend = "sensobol",
+      matrices = c("A", "B", "AB"),
+      first = "saltelli",
+      total = "jansen",
+      factor_metadata = factor_metadata
+    ))
+  }
 
   # loop over inputs.
   for (i in seq_along(samp.ordered)) {
@@ -54,33 +172,20 @@ generate_joint_ensemble_design <- function(settings,
       parent_ids = parent_ids
     )
 
-    sampled_inputs[[input_tag]] <- input_result$ids
+    sampled_inputs[[input_tag]] <- input_result
     design_list[[input_tag]] <- input_result$ids
   }
-  # Sample parameters if we don't have it.
+
   if (!file.exists(file.path(settings$outdir, "samples.Rdata"))) {
     PEcAn.uncertainty::get.parameter.samples(
       settings,
       ensemble.size = ensemble_size,
       posterior.files,
-      ens.sample.method)
+      ens.sample.method
+    )
   }
-  # Here we assumed the length of parameters is identical to the ensemble size.
-  # TODO: detect if they are identical. If not, we will need to resample the 
-  # parameters with replacement.
+
   design_list[["param"]] <- seq_len(ensemble_size)
   design_matrix <- data.frame(design_list)
-
-  if (sobol) {
-    half <- floor(ensemble_size / 2)
-    X1 <- design_matrix[1:half, ]
-    X2 <- design_matrix[(half + 1):ensemble_size, ]
-    sobol_obj <- sensitivity::soboljansen(model = NULL, X1 = X1, X2 = X2)
-    return(sobol_obj)
-  }
-  # This ensures that regardless of whether the sobol or non-sobol version is called 
-  # that the output is a list that includes the design as X. In the sobol version the 
-  # list includes additional info beyond just X that's required by the function that 
-  # does the sobol index calculations, but not required to do the runs themselves.
   return(list(X = design_matrix))
 }
