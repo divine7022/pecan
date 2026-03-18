@@ -32,9 +32,9 @@ run.write.configs <- function(settings, ensemble.size, input_design, write = TRU
 
   # Validate that input_design matches ensemble.size
   if (nrow(input_design) != ensemble.size) {
-    stop(
+    PEcAn.logger::logger.error(
       "input_design has ", nrow(input_design), " rows, but ensemble.size is ",
-      ensemble.size, ".The design matrix must have exactly one row for each run."
+      ensemble.size, ". The design matrix must have exactly one row for each run."
     )
   }
                               
