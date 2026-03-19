@@ -119,6 +119,27 @@ run.write.configs <- function(settings, ensemble.size, input_design, write = TRU
     load(samples.file, envir = samples) ## loads ensemble.samples, trait.samples, sa.samples, runs.samples, env.samples
     trait.samples <- samples$trait.samples
     trait_sample_indices <- input_design[["param"]]
+    if (is.null(trait_sample_indices)) {
+      PEcAn.logger::logger.error(
+        "input_design must include a `param` column selecting rows from trait.samples"
+      )
+    }
+    if (is.null(trait.samples) || length(trait.samples) == 0) {
+      PEcAn.logger::logger.error(
+        "samples.Rdata does not contain trait.samples required for input_design$param"
+      )
+    }
+    first_pft <- trait.samples[[1]]
+    first_trait <- first_pft[[1]]
+    trait_sample_indices <- as.integer(trait_sample_indices)
+    if (any(is.na(trait_sample_indices)) || any(trait_sample_indices < 1L)) {
+      PEcAn.logger::logger.error("input_design$param must contain positive integer indices")
+    }
+    if (is.null(first_trait) || any(trait_sample_indices > length(first_trait))) {
+      PEcAn.logger::logger.error(
+        "input_design$param includes indices beyond the available parameter sample bank"
+      )
+    }
     ensemble.samples <- list()
     for (pft in names(trait.samples)) {
       pft_traits <- trait.samples[[pft]]
