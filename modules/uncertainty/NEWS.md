@@ -1,3 +1,13 @@
+# PEcAn.uncertainty 1.9.0.9000
+
+* run.ensemble.analysis() now respects `settings$modeloutdir` rather than assuming an `out/` folder inside `settings$outdir` (@Akash-paluvai, #3722).
+* Added `generate_OAT_SA_design()` for creating input design matrices for
+sensitivity analysis. This function ensures non-parameter inputs
+(met, IC, soil) are held constant, which is required for valid 
+variance decomposition in one-at-a-time (OAT) sensitivity analysis (#3729)
+
+
+
 # PEcAn.uncertainty 1.9.0
 
 ## License change
@@ -19,7 +29,6 @@ PEcAn.uncertainty is now distributed under the BSD 3-clause license instead of t
 * `write.ensemble.configs` and `write.sa.configs` now generate an ensemble id if one is not provided in a DB-free run (#3654). Runs with DB continue to always generate a new id. Note that multi-site runs with no id provided will now get a separate ensemble ID (and thus generate separate analyses) for each site.
 * Documented that `runModule.run.sensitivity.analysis` does not yet work with multisite settings. This will be fixed in a future release.
 * The default sampling method of `get.ensemble.samples` has changed from "uniform" to "random" (#3535).
-
 
 
 

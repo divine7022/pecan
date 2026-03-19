@@ -20,7 +20,7 @@
     return(0L)
   }
 
-  return(as.integer(length(first_trait)))
+  as.integer(length(first_trait))
 }
 
 .map_sobol_to_indices <- function(x, size) {
@@ -33,16 +33,20 @@
 #' all sites in a multi-site run. This function generates sample indices that
 #' are shared across sites to ensure consistent parameter sampling.
 #'
-#' @param settings A PEcAn settings object containing ensemble configuration
+#' @param settings A PEcAn settings object containing ensemble configuration.
 #' @param ensemble_size Integer specifying the number of ensemble members.
-#'   When `sobol = TRUE`, this is the Sobol base sample size `N`, not the
-#'   expanded number of model runs.
+#'   When \code{sobol = TRUE}, this is the Sobol base sample size \code{N}, not
+#'   the expanded number of model runs.
 #' @param sobol Logical, generate a variance-based Sobol design using
-#'   `sensobol`.
-#' @return A list with component `X`, a data frame design matrix describing
-#'   PEcAn parameter and sampled-input indices. If `sobol = TRUE`, the list
-#'   also includes the metadata needed by `compute_sobol_indices()`.
+#'   \code{sensobol}.
+#'
+#' @return A list with component \code{X}, a data frame design matrix
+#'   describing PEcAn parameter and sampled-input indices. If \code{sobol = TRUE},
+#'   the list also includes the metadata needed by
+#'   \code{\link{compute_sobol_indices}}.
+#'
 #' @export
+
 generate_joint_ensemble_design <- function(settings,
                                            ensemble_size,
                                            sobol = FALSE) {
@@ -156,7 +160,6 @@ generate_joint_ensemble_design <- function(settings,
     ))
   }
 
-  # loop over inputs.
   sampled_inputs[["parameters"]] <- list(ids = seq_len(ensemble_size))
   for (i in seq_along(samp.ordered)) {
     input_tag <- names(samp.ordered)[i]
@@ -165,7 +168,6 @@ generate_joint_ensemble_design <- function(settings,
     }
 
     parent_name <- samp.ordered[[i]]$parent
-
     parent_ids <- if (!is.null(parent_name)) {
       sampled_inputs[[parent_name]]
     } else {

@@ -1,8 +1,12 @@
+# PEcAn.MA 1.7.5.9000
+
+* New function `PEcAn.MA::meta_analysis_standalone` runs meta-analysis without database or file IO (#3728).
+
+
 # PEcAn.MA 1.7.5
 
 * Added bug reporting URL and keywords to DESCRIPTION.
 * Minor internal code cleanup with no user-visible changes.
-
 
 
 # PEcAn.MA 1.7.4

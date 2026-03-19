@@ -8,12 +8,18 @@ test_that("runModule.run.write.configs uses input_design row count", {
     pfts = list(list(posterior.files = "post.distns.Rdata"))
   )
   input_design <- data.frame(param = seq_len(5))
+  captured <- new.env(parent = emptyenv())
 
   mockery::stub(
     runModule.run.write.configs,
     "PEcAn.workflow::run.write.configs",
     function(settings, ensemble.size, input_design, write, posterior.files, overwrite) {
-      list(settings = settings, ensemble.size = ensemble.size, input_design = input_design)
+      captured$ensemble.size <- ensemble.size
+      captured$input_design <- input_design
+      list(
+        ensemble = list(ensemble.id = 123),
+        pfts = settings$pfts
+      )
     }
   )
 
@@ -22,6 +28,7 @@ test_that("runModule.run.write.configs uses input_design row count", {
     input_design = input_design
   )
 
-  expect_equal(result$ensemble.size, 5)
-  expect_equal(result$settings$ensemble$size, 5)
+  expect_equal(captured$ensemble.size, 5)
+  expect_identical(captured$input_design, input_design)
+  expect_equal(result$ensemble$ensemble.id, 123)
 })

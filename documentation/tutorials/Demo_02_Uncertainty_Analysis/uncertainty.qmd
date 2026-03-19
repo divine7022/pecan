@@ -4,26 +4,25 @@ author:
   - "Aritra Dey"
   - "David LeBauer"
 format:
-  pdf:
-    toc: true
-    number-sections: true
-    fig-width: 10
-    fig-height: 6
-    fig-dpi: 300
+  html: default
+  pdf: default
+format-links: false
+toc: true
+number-sections: true
+fig-width: 10
+fig-height: 6
+fig-dpi: 300
 ---
 
 # Introduction {#introduction}
 
-In Demo 2 we will be looking at how PEcAn can use information about parameter uncertainty to perform four related analyses:
+In Demo 2 we will be looking at how PEcAn can use information about parameter uncertainty to perform three automated analyses:
 
-- **Ensemble Analysis**: Repeats model runs while sampling from parameter uncertainty to propagate parameter uncertainty through to model output and estimate uncertainty in model projections (LeBauer et al. 2013).
-- **Sensitivity Analysis**: Repeats model runs to assess how changes in model parameters affect model outputs. Allows us to identify which parameters the model is most sensitive to.
-- **Variance Decomposition**: Combines the one-at-a-time sensitivity results with parameter uncertainty to estimate which parameters contribute most to model uncertainty and help prioritize subsequent data collection (LeBauer et al. 2013).
-- **Global Sensitivity Analysis**: Uses a Sobol design to partition output variance across major sources of uncertainty such as parameters, meteorology, initial conditions, and events. In contrast to one-at-a-time analysis, this global design can account for interactions among factors (Saltelli et al. 2008).
+- **Ensemble Analysis**: Repeat numerous model runs, each sampling from the parameter uncertainty, to generate a probability distribution of model projections. Allows us to put a confidence interval on the model.
+- **Sensitivity Analysis**: Repeats numerous model runs to assess how changes in model parameters will affect model outputs. Allows us to identify which parameters the model is most sensitive to.
+- **Uncertainty Analysis**: Combines information about model sensitivity with information about parameter uncertainty to determine the contribution of each model parameter to the uncertainty in model outputs. Allow us to identify which parameters are driving model uncertainty.
 
-This demo shows how to run an uncertainty analysis workflow in PEcAn using an R-based Quarto notebook. It covers loading settings, configuring models, running simulations, and performing ensemble analysis, one-at-a-time sensitivity analysis, variance decomposition, and Sobol global sensitivity analysis. This programmatic approach complements the web-based PEcAn interface.
-
-Dietze (2017) provides a comprehensive review of sensitivity and uncertainty analysis in ecosystem modeling.
+This demo shows how to run an uncertainty analysis workflow in PEcAn using an R-based Quarto notebook. It covers loading settings, configuring models, running simulations, and performing ensemble and sensitivity analyses to assess uncertainty and parameter importance. This programmatic approach complements the web-based PEcAn interface.
 
 **Context & modeling scenario:**
 
@@ -33,7 +32,7 @@ We simulate plant and ecosystem carbon balance (Net Primary Productivity and Net
 
 1. Configure a PEcAn workflow by loading and validating a `pecan.xml` settings file.
 2. Run a set of ecosystem model simulations by writing model configuration files and then running SIPNET.
-3. Quantify uncertainty using ensemble analysis, one-at-a-time sensitivity analysis, variance decomposition, and Sobol global sensitivity analysis.
+3. Quantify uncertainty using ensemble analysis, sensitivity analyses, and variance decomposition.
 4. Visualize results to identify important parameters and how they influence model variance.
 5. Change configuration settings and re-run the workflow.
 
@@ -48,7 +47,7 @@ To run this notebook, you will need to install PEcAn and its dependencies, as we
 options(repos = c(
   pecanproject = 'https://pecanproject.r-universe.dev',
   CRAN = 'https://cloud.r-project.org'))
-install.packages('PEcAn.all')
+install.packages(c('PEcAn.all', 'PEcAn.SIPNET'))
 ```
 
 A valid `pecan.xml` configuration file. Start with the example at `pecan/documentation/tutorials/Demo_02_Uncertainty_Analysis/pecan.xml`.
@@ -105,7 +104,7 @@ The sampling method for generating parameter sets is set to **halton** in this d
 
 PEcAn's sensitivity analysis includes a handy shortcut that converts a specified standard deviation into its normal quantile equivalent. In the example pecan.xml, these are set to **-1, 1** (the median value, 0, occurs by default) which are converted internally to the 15.9th and 84.1th quantiles of the parameter distribution. You can add more quantiles to explore a wider range of parameter values: {-3, -2, -1, 1, 2, 3} is often used in practice. 
 
-By working in quantiles relative to each parameter's distribution, the sensitivity and variance decomposition reflect sensitivity across the range of parameter values. This matches the PEcAn goal of propagating parameter uncertainty through to model output and then evaluating how much each parameter contributes to model uncertainty (LeBauer et al. 2013). Many one-at-a-time analyses use a fixed perturbation such as mean +/- 10%, but that does not capture uncertainty across the parameter distribution and therefore does not support the same variance decomposition workflow.
+By working in quantiles relative to each parameter’s distribution, the sensitivity and variance decomposition reflect sensitivity across the range of parameter values. Many sensitivity analyses tools use a fixed perturbation size such as the mean +/- 10%. PEcAn's SA does not take this approach because it does not capture the uncertainty across the parameter distribution and can not be used for variance decomposition.
 
 ## Load the settings file
 
@@ -123,10 +122,6 @@ See Demo 1 Section 6 for details on what these functions do. Briefly, they read 
 
 This step generates the model-specific configuration files that will be used to run the ecosystem model. The process involves:
 
-1. Disabling database write operations because we are not using a database
-```{r disable-db-write}
-settings$database <- NULL # Disable database operations for this demo
-```
 2. Generating SIPNET configuration files using the `runModule.run.write.configs()` function.
 ```{r write-configs}
 settings <- PEcAn.workflow::runModule.run.write.configs(settings)
@@ -152,9 +147,9 @@ Next we convert all of the model output from the previous run to a standard form
 runModule.get.results(settings)
 ```
 
-# Ensemble, Sensitivity, Variance Decomposition, and Global Sensitivity Analysis {#sec-run-uncertainty}
+# Ensemble and Sensitivity Analysis {#sec-run-uncertainty}
 
-Next, we use the outputs from the previous step for two related workflows: an ensemble plus one-at-a-time sensitivity workflow that feeds the variance decomposition analysis, and a separate Sobol global sensitivity workflow.
+Next, we use the outputs from the previous step to perform ensemble and sensitivity analyses.
 
 **Ensemble Analysis**: Quantifies uncertainty in model predictions by running multiple simulations with parameters sampled from their uncertainty distributions. This generates probability distributions of model outputs and confidence intervals.
 
@@ -162,42 +157,10 @@ Next, we use the outputs from the previous step for two related workflows: an en
 runModule.run.ensemble.analysis(settings)
 ```
 
-**Sensitivity Analysis**: Systematically varies individual parameters to assess their influence on model outputs. In this demo, these one-at-a-time runs are also the basis for the variance decomposition analysis that follows. This is useful for prioritizing parameters, but it does not estimate interactions among uncertain factors.
+**Sensitivity Analysis**: Systematically varies individual parameters to assess their influence on model outputs. This identifies which parameters most strongly affect model predictions and helps prioritize parameter refinement efforts.
 
 ```{r run-sensitivity-analysis}
 runModule.run.sensitivity.analysis(settings)
-```
-
-## Sobol Global Sensitivity Analysis
-
-Sobol global sensitivity analysis is a separate variance-based workflow. Rather than using the one-at-a-time sensitivity results, it starts from a Sobol design and estimates first-order and total-order contributions directly from a global run ensemble. This is a variance-based global sensitivity analysis: it diagnoses how uncertainty in the inputs contributes to uncertainty in the model output, including interactions among factors (Dietze 2017; Saltelli et al. 2008). PEcAn computes these indices using `sensobol` (Puy et al. 2022). It is often helpful to run this analysis in a new output directory to clearly separate runs generated by the Sobol design.
-
-> Note: In Sobol mode, `ensemble_size` means the base sample size `N`, not the expanded number of model runs.
-
-```{r run-sobol-gsa, eval=FALSE}
-gsa_settings <- settings
-# Use a fresh output directory before running this block.
-
-sobol_design <- PEcAn.uncertainty::generate_joint_ensemble_design(
-  settings = gsa_settings,
-  ensemble_size = 16,
-  sobol = TRUE
-)
-
-gsa_settings <- PEcAn.workflow::runModule.run.write.configs(
-  settings = gsa_settings,
-  input_design = sobol_design$X
-)
-PEcAn.workflow::runModule_start_model_runs(gsa_settings)
-runModule.get.results(gsa_settings)
-
-sobol_indices <- PEcAn.uncertainty::compute_sobol_indices(
-  outdir = gsa_settings$outdir,
-  sobol_obj = sobol_design,
-  var = "NPP"
-)
-
-sobol_indices
 ```
 
 # PEcAn Outputs {#sec-outputs}
@@ -206,10 +169,7 @@ sobol_indices
 
 These are the key folders and files that will be created under the directory defined by `settings$outdir` (e.g., `demo_outdir` in the example). The file contents are described in the next section.
 
-We discussed the output directory in Demo 1 (Basic Run), but now we have additional outputs from the ensemble, one-at-a-time sensitivity, variance decomposition, and Sobol global sensitivity analyses. Here we focus on those additional analysis products.
-
-Note: The layout below is representative - the actual files in the out directory will depend
-on workflow settings.
+We discussed the output directory in Demo 1 (Basic Run), but now we have three new folders that contain outputs from the sensitivity, ensemble, and variance decomposition analyses. Here we focus on the additional outputs generated by the ensemble and sensitivity analyses.
 
 ```
 demo_outdir/
@@ -224,8 +184,6 @@ demo_outdir/
 ├── ensemble.samples.*.Rdata              # Parameter samples used for ensemble
 ├── ensemble.ts.*.Rdata                   # Time series data from ensemble
 ├── samples.Rdata                         # Parameter samples for both SA and ensemble
-├── sobol.design.*.Rdata                  # Saved Sobol design metadata for post-processing
-├── sobol.indices.*.Rdata                 # Saved Sobol first-order and total-order indices
 ├── sensitivity.output.*.Rdata            # SA model outputs
 ├── sensitivity.results.*.Rdata           # Processed SA results
 ├── sensitivity.samples.*.Rdata           # SA parameter samples
@@ -244,7 +202,7 @@ demo_outdir/
 
 # Understanding PEcAn Uncertainty Analysis Outputs
 
-After running ensemble analysis, one-at-a-time sensitivity analysis, variance decomposition, and global sensitivity analysis, PEcAn generates several important outputs that help you understand model uncertainty and parameter sensitivity.
+After running ensemble and sensitivity analyses, PEcAn generates several important outputs that help you understand model uncertainty and parameter sensitivity.
 
 The `samples.Rdata` file contains the parameter values used in the sensitivity and ensemble runs. It stores two objects, `sa.samples` and `ensemble.samples`, which are the parameter values for the sensitivity analysis and ensemble runs, respectively.
 
@@ -252,7 +210,7 @@ The `samples.Rdata` file contains the parameter values used in the sensitivity a
 
 The ensemble analysis produces:
 
-- **`ensemble.output.[RunID].[Variable].[StartYear].[EndYear].Rdata`**: Contains the `ensemble.output` object with model predictions for all ensemble members
+- **`ensemble.Rdata`**: Contains `ensemble.output` object with model predictions for all ensemble members
 - **`ensemble.analysis.[RunID].[Variable].[StartYear].[EndYear].pdf`**: Histogram and boxplot of ensemble predictions
 - **`ensemble.ts.[RunID].[Variable].[StartYear].[EndYear].pdf`**: Time-series plot showing ensemble mean, median, and 95% confidence intervals
 
@@ -272,16 +230,6 @@ The variance decomposition produces:
   - Coefficient of variation (normalized posterior variance)
   - Elasticity (normalized sensitivity) 
   - Partial standard deviation of each parameter
-
-
-## Sobol Global Sensitivity Outputs
-
-The Sobol global sensitivity analysis generates:
-
-- **`sobol.design.[RunID].[Variable].[StartYear].[EndYear].Rdata`**: The saved Sobol design metadata used to map PEcAn runs back to the Sobol estimator.
-- **`sobol.indices.[RunID].[Variable].[StartYear].[EndYear].Rdata`**: The computed first-order and total-order Sobol indices for each uncertainty class in the design. First-order indices summarize the direct contribution of each factor, whereas total-order indices summarize the factor's overall contribution including interactions (Saltelli et al. 2008). PEcAn computes these indices using `sensobol` (Puy et al. 2022).
-
-After running the Sobol workflow, you can inspect `sobol_indices` directly or load the saved `sobol.indices.*.Rdata` file to compare first-order and total-order contributions across uncertainty classes.
 
 ## Interpreting the Results
 
@@ -310,6 +258,7 @@ Here we visualize the results of the ensemble analysis. It shows the overall dis
 
 This section reproduces the plots saved in the `ensemble.analysis/` folder in order to show the user how to access and visualize the results programmatically so that they can further investigate output and customize plots.
 
+
 ```{r visualize-ensemble-results}
 # --- 1. Define Helper Variables ---
 # Extract key variables from the settings object to simplify file path construction
@@ -318,50 +267,58 @@ variable <- settings$ensemble$variable
 pft <- settings$pfts[[1]]
 start.year <- lubridate::year(settings$run$start.date)
 end.year <- lubridate::year(settings$run$end.date)
-ensemble.id <- if (!is.null(settings$ensemble$ensemble.id)) settings$ensemble$ensemble.id else "NOENSEMBLEID"
+
 
 # --- 2. Load and Plot Ensemble Output Distribution ---
 # This section visualizes the distribution of the ensemble model runs.
 # It generates a histogram and a boxplot to show the central tendency, spread,
 # and shape of the output variable's distribution.
 
-# Construct the path to the ensemble output file
-ens_file <- PEcAn.uncertainty::ensemble.filename(
-  settings,
-  prefix = "ensemble.output",
-  ensemble.id = ensemble.id,
-  variable = variable,
-  start.year = start.year,
-  end.year = end.year
-)
+vars <- settings$ensemble[names(settings$ensemble) == "variable"]
+variables <- unlist(vars)
+# Loop through each requested variable
+for (var in variables) {
+  # Construct the path to the ensemble output file
+  ens_file <- PEcAn.uncertainty::ensemble.filename(
+    settings,
+    prefix = "ensemble.output",
+    all.var.yr = FALSE
+  )
 
-# Check if the file exists, then load and plot the data
-if (file.exists(ens_file)) {
-  ens_env <- new.env()
-  load(ens_file, envir = ens_env)
-  ens_data <- as.numeric(unlist(ens_env$ensemble.output))
+  if (file.exists(ens_file)) {
+    PEcAn.logger::logger.info(paste("Plotting ensemble results for variable:", var, "from", basename(ens_file)))
 
-  # Define units for plot labels
-  units <- paste0(variable, " (", PEcAn.utils::mstmipvar(variable, silent = TRUE)$units, ")")
+    ens_env <- new.env()
+    load(ens_file, envir = ens_env)
 
-  # Create side-by-side histogram and boxplot
-  par(mfrow = c(1, 2), mar = c(4, 4.8, 1, 2))
-  hist(ens_data, xlab = units, main = "Ensemble Distribution", cex.lab = 1.4, col = "grey85")
-  box(lwd = 2.2)
-  boxplot(ens_data, ylab = units, main = "Ensemble Boxplot", col = "grey85", cex.lab = 1.5)
-  box(lwd = 2.2)
-  par(mfrow = c(1, 1))
-} else {
-  PEcAn.logger::logger.warn("Could not find ensemble output file:", ens_file)
+    if (!is.null(ens_env$ensemble.output)) {
+      ens_data <- as.numeric(unlist(ens_env$ensemble.output))
+
+      # Define units for plot labels
+      units <- paste0(var, " (", PEcAn.utils::mstmipvar(var, silent = TRUE)$units, ")")
+
+      # Create side-by-side histogram and boxplot
+      par(mfrow = c(1, 2), mar = c(4, 4.8, 1, 2))
+      hist(ens_data, xlab = units, main = paste("Ensemble Dist:", var), cex.lab = 1.4, col = "grey85")
+      box(lwd = 2.2)
+      boxplot(ens_data, ylab = units, main = paste("Ensemble Boxplot:", var), col = "grey85", cex.lab = 1.5)
+      box(lwd = 2.2)
+      par(mfrow = c(1, 1))
+    }
+  } else {
+    PEcAn.logger::logger.warn(paste("Could not find ensemble output file for variable:", var))
+  }
 }
-
 
 # --- 3. Plot Ensemble Time Series ---
 # This section visualizes the ensemble results over time, showing the mean,
 # median, and 95% confidence interval of the model output.
-ens_ts_data <- PEcAn.uncertainty::read.ensemble.ts(settings, variable = variable)
-if (!is.null(ens_ts_data)) {
-  PEcAn.uncertainty::ensemble.ts(ens_ts_data)
+# Loop through each variable for time series plots
+for (var in variables) {
+  ens_ts_data <- PEcAn.uncertainty::read.ensemble.ts(settings, variable = var)
+  if (!is.null(ens_ts_data)) {
+    PEcAn.uncertainty::ensemble.ts(ens_ts_data)
+  }
 }
 ```
 
@@ -371,43 +328,50 @@ This block visualizes the results of the sensitivity analysis. The plots show ho
 
 ```{r visualize-sensitivity-results}
 # --- 1. Load Sensitivity Analysis Results ---
-# This section loads the saved sensitivity analysis data, which contains the
-# outputs needed to generate the sensitivity and variance decomposition plots.
+vars <- settings$sensitivity.analysis[names(settings$sensitivity.analysis) == "variable"]
+variables <- unlist(vars)
 
-# Construct the path to the sensitivity analysis results file
-sensitivity.id <- if (!is.null(settings$sensitivity.analysis$ensemble.id)) {
-  settings$sensitivity.analysis$ensemble.id
-} else {
-  "NOENSEMBLEID"
-}
-sens_file <- file.path(
-  settings$outdir,
-  paste0("sensitivity.results", ".", sensitivity.id, ".", variable, ".", start.year, ".", end.year, ".Rdata")
-)
-
-# Check if the file exists, then load the data and generate plots
-if (file.exists(sens_file)) {
-  sens_env <- new.env()
-  load(sens_file, envir = sens_env)
-  sensitivity.results <- sens_env$sensitivity.results
-
-  # --- 2. Generate Sensitivity Plots ---
-  # These plots show how the model output changes as each parameter is varied
-  # one at a time, helping to identify which parameters have the strongest influence.
-  sa_plots <- PEcAn.uncertainty::plot_sensitivities(
-    sensitivity.results[[pft$name]]$sensitivity.output
+for (var in variables) {
+  # Construct the path to the sensitivity analysis results file
+  sens_file <- PEcAn.uncertainty::sensitivity.filename(
+    settings,
+    prefix = "sensitivity.results",
+    all.var.yr = FALSE
   )
-  print(do.call(gridExtra::grid.arrange, c(sa_plots, ncol = floor(sqrt(length(sa_plots))))))
 
-  # --- 3. Generate Variance Decomposition Plots ---
-  # These plots break down the total output variance into contributions from
-  # each parameter, highlighting the most important sources of uncertainty.
-  vd_plots <- PEcAn.uncertainty::plot_variance_decomposition(
-    sensitivity.results[[pft$name]]$variance.decomposition.output
-  )
-  print(do.call(gridExtra::grid.arrange, c(vd_plots, ncol = 4)))
-} else {
-  PEcAn.logger::logger.warn("Could not find sensitivity results file:", sens_file)
+  if (file.exists(sens_file)) {
+    PEcAn.logger::logger.info(paste("Plotting sensitivity results for variable:", var, "from", basename(sens_file)))
+
+    sens_env <- new.env()
+    load(sens_file, envir = sens_env)
+    sensitivity.results <- sens_env$sensitivity.results
+
+    # --- 2. Generate Sensitivity Plots ---
+    if (!is.null(sensitivity.results[[pft$name]]$sensitivity.output)) {
+      sa_plots <- PEcAn.uncertainty::plot_sensitivities(
+        sensitivity.results[[pft$name]]$sensitivity.output
+      )
+      # Explicitly print the plot
+      gridExtra::grid.arrange(
+        grobs = sa_plots, ncol = floor(sqrt(length(sa_plots))),
+        top = paste("Sensitivity Analysis:", var)
+      )
+    }
+
+    # --- 3. Generate Variance Decomposition Plots ---
+    if (!is.null(sensitivity.results[[pft$name]]$variance.decomposition.output)) {
+      vd_plots <- PEcAn.uncertainty::plot_variance_decomposition(
+        sensitivity.results[[pft$name]]$variance.decomposition.output
+      )
+      # Explicitly print the plot
+      gridExtra::grid.arrange(
+        grobs = vd_plots, ncol = 4,
+        top = paste("Variance Decomposition:", var)
+      )
+    }
+  } else {
+    PEcAn.logger::logger.warn(paste("Could not find sensitivity results file for variable:", var))
+  }
 }
 ```
 
@@ -508,7 +472,7 @@ plot(model_output$posix, model_output$GPP,
   col = "green",
   xlab = "Date",
   ylab = "Carbon Flux (kg C m-2 s-1)",
-  main = paste("Carbon Fluxes Over Time - PEcAn", runid)
+  main = paste("Carbon Fluxes Over Time — PEcAn", runid)
 )
 lines(model_output$posix, model_output$NPP, col = "blue")
 legend("topright", legend = c("GPP", "NPP"), col = c("green", "blue"), lty = 1)
@@ -523,7 +487,7 @@ plot(model_output$posix, model_output$TotLivBiom,
   col = "darkgreen",
   xlab = "Date",
   ylab = "Carbon Pool (kg C m-2)",
-  main = paste("Carbon Pools Over Time - PEcAn", runid)
+  main = paste("Carbon Pools Over Time — PEcAn", runid)
 )
 lines(model_output$posix, model_output$TotSoilCarb, col = "brown")
 legend("topright", legend = c("Total Live Biomass", "Total Soil Carbon"), col = c("darkgreen", "brown"), lty = 1)
@@ -538,7 +502,7 @@ plot(model_output$posix, model_output$SoilMoist,
   col = "blue",
   xlab = "Date",
   ylab = "Soil Moisture (kg m-2)",
-  main = paste("Soil Moisture Over Time - PEcAn", runid)
+  main = paste("Soil Moisture Over Time — PEcAn", runid)
 )
 lines(model_output$posix, model_output$SWE, col = "lightblue")
 legend("topright", legend = c("Soil Moisture", "Snow Water Equivalent"), col = c("blue", "lightblue"), lty = 1)
@@ -553,23 +517,17 @@ plot(model_output$posix, model_output$LAI,
   col = "darkgreen",
   xlab = "Date",
   ylab = "LAI (m2 m-2)",
-  main = paste("Leaf Area Index Over Time - PEcAn", runid)
+  main = paste("Leaf Area Index Over Time — PEcAn", runid)
 )
 lines(model_output$posix, model_output$AbvGrndWood, col = "brown")
 legend("topright", legend = c("LAI", "Above Ground Wood"), col = c("darkgreen", "brown"), lty = 1)
 ```
 
-# Your turn
-
-Try visualizing other variables in the model output! Use the `available_vars` object to see what variables are available and create your own time series plots. You can also customize the plots with different colors, labels, and titles.
-
-Try editing the `pecan.xml` file. Give it a new name and update the **settings_path** variable at the beginning of this Demo to point to the new file. See how the changes affect the model output!
-
-Inspect `sobol_indices` and identify which uncertainty class has the largest first-order contribution to variance, and which has the largest total-order contribution. Differences between first-order and total-order indices indicate the importance of interactions. <!-- TODO: add Sobol GSA visualization and interpretation example -->
-
 # Conclusion
 
 This notebook demonstrated how to set up, run, and analyze a PEcAn ecosystem model workflow programmatically. You can now modify parameters, try different models, or extend the analysis as needed.
+
+Try editing the `pecan.xml` file. Give it a new name and update the **settings_path** variable at the beginning of this Demo to point to the new file. See how the changes affect the model output!
 
 # Further Exploration
 
@@ -614,13 +572,3 @@ PEcAn.all::pecan_version()
 ```{r session-info}
 sessionInfo()
 ```
-
-# References
-
-Dietze, M., 2017. Ecological Forecasting. Princeton University Press.
-
-LeBauer, D. S., Wang, D., Richter, K. T., Davidson, C. C., and Dietze, M. C. 2013. Facilitating feedbacks between field measurements and ecosystem models. *Ecological Monographs* 83(2):133-154.
-
-Puy, A., Lo Piano, S., Saltelli, A., and Levin, S. A. 2022. sensobol: An R Package to Compute Variance-Based Sensitivity Indices. *Journal of Statistical Software* 102(5):1-37. https://doi.org/10.18637/jss.v102.i05
-
-Saltelli, A., Ratto, M., Andres, T., Campolongo, F., Cariboni, J., Gatelli, D. et al. 2008. *Global Sensitivity Analysis: The Primer*. New York: John Wiley & Sons.

@@ -10,19 +10,20 @@ are shared across sites to ensure consistent parameter sampling.}
 generate_joint_ensemble_design(settings, ensemble_size, sobol = FALSE)
 }
 \arguments{
-\item{settings}{A PEcAn settings object containing ensemble configuration}
+\item{settings}{A PEcAn settings object containing ensemble configuration.}
 
 \item{ensemble_size}{Integer specifying the number of ensemble members.
-When `sobol = TRUE`, this is the Sobol base sample size `N`, not the
-expanded number of model runs.}
+When \code{sobol = TRUE}, this is the Sobol base sample size \code{N}, not
+the expanded number of model runs.}
 
 \item{sobol}{Logical, generate a variance-based Sobol design using
-`sensobol`.}
+\code{sensobol}.}
 }
 \value{
-A list with component `X`, a data frame design matrix describing
-  PEcAn parameter and sampled-input indices. If `sobol = TRUE`, the list
-  also includes the metadata needed by `compute_sobol_indices()`.
+A list with component \code{X}, a data frame design matrix
+  describing PEcAn parameter and sampled-input indices. If \code{sobol = TRUE},
+  the list also includes the metadata needed by
+  \code{\link{compute_sobol_indices}}.
 }
 \description{
 Generate joint ensemble design for parameter sampling

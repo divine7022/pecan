@@ -1,7 +1,7 @@
 Package: PEcAn.data.atmosphere
 Type: Package
 Title: PEcAn Functions Used for Managing Climate Driver Data
-Version: 1.9.1
+Version: 1.9.1.9000
 Authors@R: c(person("Mike", "Dietze", role = c("aut"),
                      email = "dietze@bu.edu"),
              person("David", "LeBauer", role = c("aut", "cre"),
@@ -73,7 +73,7 @@ Suggests:
     future,
     getPass,
     ggplot2,
-    knitr,
+    knitr (>= 1.50),
     mockery,
     parallel,
     PEcAn.settings,
@@ -93,5 +93,5 @@ LazyLoad: yes
 LazyData: FALSE
 VignetteBuilder: knitr, rmarkdown
 Encoding: UTF-8
-RoxygenNote: 7.3.2
+RoxygenNote: 7.3.3
 X-schema.org-keywords: climate-data, data-standardization
