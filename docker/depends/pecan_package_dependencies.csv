@@ -560,7 +560,7 @@
 "RPostgreSQL","*","base/db","Suggests",FALSE
 "RPostgreSQL","*","models/biocro","Suggests",FALSE
 "RSQLite","*","base/db","Suggests",FALSE
-"sensitivity","*","modules/uncertainty","Imports",FALSE
+"sensobol","*","modules/uncertainty","Imports",FALSE
 "sessioninfo","*","base/all","Suggests",FALSE
 "sf","*","modules/assim.sequential","Suggests",FALSE
 "sf","*","modules/data.atmosphere","Imports",FALSE
