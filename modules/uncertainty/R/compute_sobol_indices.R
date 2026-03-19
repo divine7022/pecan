@@ -7,28 +7,29 @@
 #' First-order indices quantify the share of output variance attributable to a
 #' parameter alone, while total-order indices summarize the full contribution of
 #' that parameter including its interactions with other parameters. PEcAn uses
-#' `sensobol` for these variance-based estimators; readers wanting estimator
-#' details or broader background should refer to Puy et al. (2022).
+#' `sensobol` for these variance-based estimators; see Saltelli et al. (2008)
+#' for methodological background and Puy et al. (2022) for package details.
 #'
 #' @param outdir PEcAn run output directory containing `ensemble.output.*.Rdata`
 #'   files.
 #' @param sobol_obj object produced by
 #'   `PEcAn.uncertainty::generate_joint_ensemble_design(..., sobol = TRUE)`.
 #' @param var Variable name to summarize (default `"GPP"`).
-#' @param stat_fun Summary statistic applied to `var`. Retained for backwards
-#'   compatibility; standardized ensemble outputs are already scalar summaries.
 #'
 #' @return A tibble of Sobol first-order and total-order indices with attached
 #'   factor metadata.
-#' @references Puy, A., Lo Piano, S., Saltelli, A., and Levin, S. A. (2022).
+#' @references Saltelli, A., Ratto, M., Andres, T., Campolongo, F., Cariboni,
+#'   J., Gatelli, D., et al. (2008). Global Sensitivity Analysis: The Primer.
+#'   John Wiley & Sons.
+#'
+#'   Puy, A., Lo Piano, S., Saltelli, A., and Levin, S. A. (2022).
 #'   sensobol: An R Package to Compute Variance-Based Sensitivity Indices.
 #'   Journal of Statistical Software, 102(5), 1-37.
 #'   \doi{10.18637/jss.v102.i05}
 #' @export
 compute_sobol_indices <- function(outdir,
                                   sobol_obj,
-                                  var = "GPP",
-                                  stat_fun = mean) {
+                                  var = "GPP") {
   if (is.null(sobol_obj$backend) || sobol_obj$backend != "sensobol") {
     PEcAn.logger::logger.error(
       "compute_sobol_indices expects a sensobol design object returned by ",
