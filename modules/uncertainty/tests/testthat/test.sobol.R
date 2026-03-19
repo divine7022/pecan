@@ -26,6 +26,30 @@ make_sobol_settings <- function(outdir) {
   )
 }
 
+make_parameter_parent_settings <- function(outdir, poolinit_paths) {
+  samples_file <- file.path(outdir, "samples.Rdata")
+  trait.samples <- list(
+    temperate = list(
+      SLA = seq_len(40)
+    )
+  )
+  save(trait.samples, file = samples_file)
+
+  PEcAn.settings::Settings(
+    outdir = outdir,
+    pfts = list(list(name = "temperate", posterior.files = "post.distns.Rdata")),
+    run = list(inputs = list(
+      poolinitcond = list(path = poolinit_paths)
+    )),
+    ensemble = list(
+      samplingspace = list(
+        parameters = list(method = "uniform"),
+        poolinitcond = list(method = "looping", parent = "parameters")
+      )
+    )
+  )
+}
+
 test_that("Sobol design expands to N * (k + 2) rows with metadata", {
   withr::with_tempdir({
     settings <- make_sobol_settings(getwd())
@@ -65,6 +89,46 @@ test_that("Non-Sobol design generation remains row-for-row", {
     expect_named(result, "X")
     expect_equal(nrow(result$X), 5)
     expect_false("backend" %in% names(result))
+  })
+})
+
+test_that("Parameter-parented inputs inherit parameter ids in ordinary designs", {
+  withr::with_tempdir({
+    settings <- make_parameter_parent_settings(
+      getwd(),
+      paste0("ic", seq_len(8))
+    )
+
+    result <- generate_joint_ensemble_design(
+      settings = settings,
+      ensemble_size = 5,
+      sobol = FALSE
+    )
+
+    expect_equal(result$X$param, seq_len(5))
+    expect_equal(result$X$poolinitcond, result$X$param)
+  })
+})
+
+test_that("Sobol keeps parameter-parented child inputs in bounds", {
+  withr::with_tempdir({
+    set.seed(1)
+    settings <- make_parameter_parent_settings(
+      getwd(),
+      c("ic1", "ic2", "ic3")
+    )
+
+    result <- generate_joint_ensemble_design(
+      settings = settings,
+      ensemble_size = 4,
+      sobol = TRUE
+    )
+
+    expect_equal(nrow(result$X), 12)
+    expect_true(all(result$X$param >= 1))
+    expect_true(all(result$X$param <= 12))
+    expect_true(all(result$X$poolinitcond >= 1))
+    expect_true(all(result$X$poolinitcond <= 3))
   })
 })
 
