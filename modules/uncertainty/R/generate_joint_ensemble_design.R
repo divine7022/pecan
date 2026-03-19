@@ -1,3 +1,37 @@
+.trait_sample_bank_size <- function(trait.samples) {
+  if (is.null(trait.samples) || length(trait.samples) == 0) {
+    return(0L)
+  }
+
+  bank_sizes <- unlist(
+    lapply(trait.samples, function(pft_traits) {
+      if (is.null(pft_traits) || length(pft_traits) == 0) {
+        return(integer(0))
+      }
+
+      vapply(
+        pft_traits,
+        function(trait_values) {
+          if (is.null(trait_values) || length(trait_values) == 0) {
+            return(NA_integer_)
+          }
+
+          as.integer(length(trait_values))
+        },
+        integer(1)
+      )
+    }),
+    use.names = FALSE
+  )
+
+  bank_sizes <- bank_sizes[!is.na(bank_sizes) & bank_sizes > 0L]
+  if (length(bank_sizes) == 0) {
+    return(0L)
+  }
+
+  as.integer(min(bank_sizes))
+}
+
 .sobol_parameter_bank_size <- function(samples_file) {
   if (!file.exists(samples_file)) {
     return(0L)
@@ -10,17 +44,7 @@
     return(0L)
   }
 
-  first_pft <- samples$trait.samples[[1]]
-  if (is.null(first_pft) || length(first_pft) == 0) {
-    return(0L)
-  }
-
-  first_trait <- first_pft[[1]]
-  if (is.null(first_trait)) {
-    return(0L)
-  }
-
-  as.integer(length(first_trait))
+  .trait_sample_bank_size(samples$trait.samples)
 }
 
 .map_sobol_to_indices <- function(x, size) {

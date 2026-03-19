@@ -50,6 +50,33 @@ make_parameter_parent_settings <- function(outdir, poolinit_paths) {
   )
 }
 
+make_mixed_bank_sobol_settings <- function(outdir) {
+  samples_file <- file.path(outdir, "samples.Rdata")
+  trait.samples <- list(
+    hardwood = list(
+      SLA = seq_len(20)
+    ),
+    conifer = list(
+      SLA = seq_len(10)
+    )
+  )
+  save(trait.samples, file = samples_file)
+
+  PEcAn.settings::Settings(
+    outdir = outdir,
+    pfts = list(
+      list(name = "hardwood", posterior.files = "post1.distns.Rdata"),
+      list(name = "conifer", posterior.files = "post2.distns.Rdata")
+    ),
+    run = list(inputs = list()),
+    ensemble = list(
+      samplingspace = list(
+        parameters = list(method = "uniform")
+      )
+    )
+  )
+}
+
 test_that("Sobol design expands to N * (k + 2) rows with metadata", {
   withr::with_tempdir({
     settings <- make_sobol_settings(getwd())
@@ -129,6 +156,40 @@ test_that("Sobol keeps parameter-parented child inputs in bounds", {
     expect_true(all(result$X$param <= 12))
     expect_true(all(result$X$poolinitcond >= 1))
     expect_true(all(result$X$poolinitcond <= 3))
+  })
+})
+
+test_that("Sobol regenerates parameter bank when any PFT bank is too short", {
+  withr::with_tempdir({
+    settings <- make_mixed_bank_sobol_settings(getwd())
+    captured <- new.env(parent = emptyenv())
+
+    mockery::stub(
+      generate_joint_ensemble_design,
+      "PEcAn.uncertainty::get.parameter.samples",
+      function(settings, ensemble.size, posterior.files, ens.sample.method) {
+        captured$ensemble.size <- ensemble.size
+        captured$posterior.files <- posterior.files
+        captured$ens.sample.method <- ens.sample.method
+        NULL
+      }
+    )
+
+    result <- generate_joint_ensemble_design(
+      settings = settings,
+      ensemble_size = 5,
+      sobol = TRUE
+    )
+
+    expect_equal(captured$ensemble.size, 15)
+    expect_identical(
+      captured$posterior.files,
+      c("post1.distns.Rdata", "post2.distns.Rdata")
+    )
+    expect_identical(captured$ens.sample.method, "uniform")
+    expect_equal(nrow(result$X), 15)
+    expect_true(all(result$X$param >= 1))
+    expect_true(all(result$X$param <= 15))
   })
 })
 
