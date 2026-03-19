@@ -1,19 +1,3 @@
-#' Generate joint ensemble design for parameter sampling
-#' Creates a joint ensemble design that maintains parameter correlations across
-#' all sites in a multi-site run. This function generates sample indices that
-#' are shared across sites to ensure consistent parameter sampling.
-#'
-#' @param settings A PEcAn settings object containing ensemble configuration
-#' @param ensemble_size Integer specifying the number of ensemble members.
-#'   When `sobol = TRUE`, this is the Sobol base sample size `N`, not the
-#'   expanded number of model runs.
-#' @param sobol Logical, generate a variance-based Sobol design using
-#'   `sensobol`.
-#' @return A list with component `X`, a data frame design matrix describing
-#'   PEcAn parameter and sampled-input indices. If `sobol = TRUE`, the list
-#'   also includes the metadata needed by `compute_sobol_indices()`.
-#' @export
-
 .sobol_parameter_bank_size <- function(samples_file) {
   if (!file.exists(samples_file)) {
     return(0L)
@@ -44,6 +28,21 @@
   as.integer(pmin(indices, size))
 }
 
+#' Generate joint ensemble design for parameter sampling
+#' Creates a joint ensemble design that maintains parameter correlations across
+#' all sites in a multi-site run. This function generates sample indices that
+#' are shared across sites to ensure consistent parameter sampling.
+#'
+#' @param settings A PEcAn settings object containing ensemble configuration
+#' @param ensemble_size Integer specifying the number of ensemble members.
+#'   When `sobol = TRUE`, this is the Sobol base sample size `N`, not the
+#'   expanded number of model runs.
+#' @param sobol Logical, generate a variance-based Sobol design using
+#'   `sensobol`.
+#' @return A list with component `X`, a data frame design matrix describing
+#'   PEcAn parameter and sampled-input indices. If `sobol = TRUE`, the list
+#'   also includes the metadata needed by `compute_sobol_indices()`.
+#' @export
 generate_joint_ensemble_design <- function(settings,
                                            ensemble_size,
                                            sobol = FALSE) {
@@ -98,9 +97,13 @@ generate_joint_ensemble_design <- function(settings,
       sobol_design[["param"]],
       total_runs
     )
+    sampled_inputs[["parameters"]] <- list(ids = sobol_indices[["param"]])
 
     for (input_tag in setdiff(sobol_factors, "param")) {
       input_paths <- settings$run$inputs[[tolower(input_tag)]]$path
+      if (is.null(input_paths) || length(input_paths) == 0) {
+        PEcAn.logger::logger.error("Input ", sQuote(input_tag), " has no paths specified")
+      }
       sobol_indices[[input_tag]] <- .map_sobol_to_indices(
         sobol_design[[input_tag]],
         length(input_paths)
@@ -154,8 +157,13 @@ generate_joint_ensemble_design <- function(settings,
   }
 
   # loop over inputs.
+  sampled_inputs[["parameters"]] <- list(ids = seq_len(ensemble_size))
   for (i in seq_along(samp.ordered)) {
     input_tag <- names(samp.ordered)[i]
+    if (identical(input_tag, "parameters")) {
+      next
+    }
+
     parent_name <- samp.ordered[[i]]$parent
 
     parent_ids <- if (!is.null(parent_name)) {
@@ -185,7 +193,7 @@ generate_joint_ensemble_design <- function(settings,
     )
   }
 
-  design_list[["param"]] <- seq_len(ensemble_size)
+  design_list[["param"]] <- sampled_inputs[["parameters"]]$ids
   design_matrix <- data.frame(design_list)
   return(list(X = design_matrix))
 }
