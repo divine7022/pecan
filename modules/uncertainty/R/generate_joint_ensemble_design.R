@@ -1,25 +1,30 @@
-.trait_sample_bank_size <- function(trait.samples) {
+#' Minimum trait sample bank size across PFTs
+#'
+#' Returns the smallest number of trait samples available across all PFTs
+#' and traits. Used to verify that the parameter bank is large enough for
+#' a Sobol or ensemble design.
+#'
+#' @param trait.samples named list of PFT trait sample lists, as stored
+#'   in \code{samples.Rdata}.
+#' @return integer, minimum bank size (0 if empty)
+#' @keywords internal
+#' @export
+trait_sample_bank_size <- function(trait.samples) {
   if (is.null(trait.samples) || length(trait.samples) == 0) {
     return(0L)
   }
 
   bank_sizes <- unlist(
-    lapply(trait.samples, function(pft_traits) {
+    purrr::map(trait.samples, function(pft_traits) {
       if (is.null(pft_traits) || length(pft_traits) == 0) {
         return(integer(0))
       }
-
-      vapply(
-        pft_traits,
-        function(trait_values) {
-          if (is.null(trait_values) || length(trait_values) == 0) {
-            return(NA_integer_)
-          }
-
-          as.integer(length(trait_values))
-        },
-        integer(1)
-      )
+      purrr::map_int(pft_traits, function(trait_values) {
+        if (is.null(trait_values) || length(trait_values) == 0) {
+          return(NA_integer_)
+        }
+        as.integer(length(trait_values))
+      })
     }),
     use.names = FALSE
   )
@@ -44,7 +49,7 @@
     return(0L)
   }
 
-  .trait_sample_bank_size(samples$trait.samples)
+  trait_sample_bank_size(samples$trait.samples)
 }
 
 .map_sobol_to_indices <- function(x, size) {
@@ -53,21 +58,31 @@
 }
 
 #' Generate joint ensemble design for parameter sampling
+#'
 #' Creates a joint ensemble design that maintains parameter correlations across
 #' all sites in a multi-site run. This function generates sample indices that
 #' are shared across sites to ensure consistent parameter sampling.
 #'
+#' When \code{sobol = TRUE}, every input listed in
+#' \code{settings$ensemble$samplingspace} (other than \code{parameters})
+#' becomes an independent Sobol factor. This allows variance-based
+#' sensitivity analysis to attribute output variance to each source
+#' (parameters, met, initial conditions, events, etc.) independently.
+#'
 #' @param settings A PEcAn settings object containing ensemble configuration.
 #' @param ensemble_size Integer specifying the number of ensemble members.
 #'   When \code{sobol = TRUE}, this is the Sobol base sample size \code{N}, not
-#'   the expanded number of model runs.
+#'   the expanded number of model runs (which will be \code{N * (k + 2)} for
+#'   \code{k} independent factors).
 #' @param sobol Logical, generate a variance-based Sobol design using
 #'   \code{sensobol}.
 #'
 #' @return A list with component \code{X}, a data frame design matrix
 #'   describing PEcAn parameter and sampled-input indices. If \code{sobol = TRUE},
 #'   the list also includes the metadata needed by
-#'   \code{\link{compute_sobol_indices}}.
+#'   \code{\link{compute_sobol_indices}}: \code{N}, \code{params},
+#'   \code{backend}, \code{matrices}, \code{first}, \code{total}, and
+#'   \code{factor_metadata}.
 #'
 #' @export
 
@@ -77,28 +92,14 @@ generate_joint_ensemble_design <- function(settings,
   ens.sample.method <- settings$ensemble$samplingspace$parameters$method
   design_list <- list()
   sampled_inputs <- list()
-  posterior.files <- settings$pfts %>%
+  posterior.files <- settings$pfts |>
     purrr::map_chr("posterior.files", .default = NA_character_)
   samp <- settings$ensemble$samplingspace
-  parents <- lapply(samp, "[[", "parent")
-  order <- names(samp)[
-    lapply(parents, function(tr) which(names(samp) %in% tr)) %>%
-      unlist()
-  ]
-  samp.ordered <- samp[c(order, names(samp)[!(names(samp) %in% order)])]
 
   if (sobol) {
-    sobol_factors <- c(
-      "param",
-      names(samp.ordered)[
-        names(samp.ordered) != "parameters" &
-          vapply(
-            samp.ordered,
-            function(x) is.null(x$parent),
-            logical(1)
-          )
-      ]
-    )
+    # every input in samplingspace (except parameters) is an independent factor
+    input_names <- setdiff(names(samp), "parameters")
+    sobol_factors <- c("param", input_names)
 
     total_runs <- as.integer(ensemble_size) * (length(sobol_factors) + 2L)
     samples_file <- file.path(settings$outdir, "samples.Rdata")
@@ -120,6 +121,7 @@ generate_joint_ensemble_design <- function(settings,
     )
     sobol_design <- as.data.frame(sobol_design)
 
+    # map param column to trait bank indices
     sobol_indices <- list()
     sobol_indices[["param"]] <- .map_sobol_to_indices(
       sobol_design[["param"]],
@@ -127,49 +129,31 @@ generate_joint_ensemble_design <- function(settings,
     )
     sampled_inputs[["parameters"]] <- list(ids = sobol_indices[["param"]])
 
-    for (input_tag in setdiff(sobol_factors, "param")) {
+    # map each input to its available paths
+    for (input_tag in input_names) {
       input_paths <- settings$run$inputs[[tolower(input_tag)]]$path
       if (is.null(input_paths) || length(input_paths) == 0) {
-        PEcAn.logger::logger.error("Input ", sQuote(input_tag), " has no paths specified")
+        PEcAn.logger::logger.error(
+          "Input ", sQuote(input_tag), " has no paths specified"
+        )
       }
       sobol_indices[[input_tag]] <- .map_sobol_to_indices(
         sobol_design[[input_tag]],
         length(input_paths)
       )
-    }
-
-    for (i in seq_along(samp.ordered)) {
-      input_tag <- names(samp.ordered)[i]
-
-      if (identical(input_tag, "parameters")) {
-        next
-      }
-
-      parent_name <- samp.ordered[[i]]$parent
-      if (!is.null(parent_name)) {
-        input_result <- PEcAn.uncertainty::input.ens.gen(
-          settings = settings,
-          ensemble_size = total_runs,
-          input = input_tag,
-          method = samp.ordered[[i]]$method,
-          parent_ids = sampled_inputs[[parent_name]]
-        )
-        sampled_inputs[[input_tag]] <- input_result
-        design_list[[input_tag]] <- input_result$ids
-      } else if (input_tag %in% names(sobol_indices)) {
-        sampled_inputs[[input_tag]] <- list(ids = sobol_indices[[input_tag]])
-        design_list[[input_tag]] <- sobol_indices[[input_tag]]
-      }
+      sampled_inputs[[input_tag]] <- list(ids = sobol_indices[[input_tag]])
+      design_list[[input_tag]] <- sobol_indices[[input_tag]]
     }
 
     design_list[["param"]] <- sobol_indices[["param"]]
-    design_matrix <- data.frame(design_list)
+    design_matrix <- tibble::as_tibble(design_list)
 
-    factor_metadata <- data.frame(
+    factor_metadata <- tibble::tibble(
       factor = sobol_factors,
       source_type = sobol_factors,
-      source_tag = ifelse(sobol_factors == "param", NA_character_, sobol_factors),
-      stringsAsFactors = FALSE
+      source_tag = ifelse(
+        sobol_factors == "param", NA_character_, sobol_factors
+      )
     )
 
     return(list(
@@ -184,28 +168,15 @@ generate_joint_ensemble_design <- function(settings,
     ))
   }
 
+  # non-Sobol path: simple sequential or sampled design
   sampled_inputs[["parameters"]] <- list(ids = seq_len(ensemble_size))
-  for (i in seq_along(samp.ordered)) {
-    input_tag <- names(samp.ordered)[i]
-    if (identical(input_tag, "parameters")) {
-      next
-    }
-
-    parent_name <- samp.ordered[[i]]$parent
-    parent_ids <- if (!is.null(parent_name)) {
-      sampled_inputs[[parent_name]]
-    } else {
-      NULL
-    }
-
+  for (input_tag in setdiff(names(samp), "parameters")) {
     input_result <- PEcAn.uncertainty::input.ens.gen(
       settings = settings,
       ensemble_size = ensemble_size,
       input = input_tag,
-      method = samp.ordered[[i]]$method,
-      parent_ids = parent_ids
+      method = samp[[input_tag]]$method
     )
-
     sampled_inputs[[input_tag]] <- input_result
     design_list[[input_tag]] <- input_result$ids
   }
@@ -220,6 +191,6 @@ generate_joint_ensemble_design <- function(settings,
   }
 
   design_list[["param"]] <- sampled_inputs[["parameters"]]$ids
-  design_matrix <- data.frame(design_list)
+  design_matrix <- tibble::as_tibble(design_list)
   return(list(X = design_matrix))
 }

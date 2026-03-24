@@ -20,31 +20,7 @@ make_sobol_settings <- function(outdir) {
         parameters = list(method = "uniform"),
         met = list(method = "sampling"),
         poolinitcond = list(method = "looping"),
-        events = list(method = "sampling", parent = "met")
-      )
-    )
-  )
-}
-
-make_parameter_parent_settings <- function(outdir, poolinit_paths) {
-  samples_file <- file.path(outdir, "samples.Rdata")
-  trait.samples <- list(
-    temperate = list(
-      SLA = seq_len(40)
-    )
-  )
-  save(trait.samples, file = samples_file)
-
-  PEcAn.settings::Settings(
-    outdir = outdir,
-    pfts = list(list(name = "temperate", posterior.files = "post.distns.Rdata")),
-    run = list(inputs = list(
-      poolinitcond = list(path = poolinit_paths)
-    )),
-    ensemble = list(
-      samplingspace = list(
-        parameters = list(method = "uniform"),
-        poolinitcond = list(method = "looping", parent = "parameters")
+        events = list(method = "sampling")
       )
     )
   )
@@ -77,7 +53,7 @@ make_mixed_bank_sobol_settings <- function(outdir) {
   )
 }
 
-test_that("Sobol design expands to N * (k + 2) rows with metadata", {
+test_that("Sobol design treats all inputs as independent factors", {
   withr::with_tempdir({
     settings <- make_sobol_settings(getwd())
 
@@ -87,19 +63,46 @@ test_that("Sobol design expands to N * (k + 2) rows with metadata", {
       sobol = TRUE
     )
 
-    expect_equal(nrow(result$X), 20)
+    # 4 independent factors: param, met, poolinitcond, events
+    # total runs = N * (k + 2) = 4 * (4 + 2) = 24
+    expect_equal(nrow(result$X), 24)
     expect_equal(result$N, 4)
-    expect_identical(result$params, c("param", "met", "poolinitcond"))
+    expect_identical(
+      result$params,
+      c("param", "met", "poolinitcond", "events")
+    )
     expect_identical(result$backend, "sensobol")
     expect_identical(result$matrices, c("A", "B", "AB"))
     expect_identical(result$first, "saltelli")
     expect_identical(result$total, "jansen")
-    expect_true(all(c("param", "met", "poolinitcond", "events") %in% names(result$X)))
-    expect_equal(result$X$events, result$X$met)
+
+    # all factor columns present
+    expect_true(all(
+      c("param", "met", "poolinitcond", "events") %in% names(result$X)
+    ))
+
+    # events should have independent indices -- not identical to met
+    # (quasi-random design makes exact equality extremely unlikely)
+    expect_false(identical(result$X$events, result$X$met))
+
+    # parameter indices stay within bank range
     expect_true(all(result$X$param >= 1))
-    expect_true(all(result$X$param <= 20))
-    expect_true(all(c("factor", "source_type", "source_tag") %in% names(result$factor_metadata)))
-    expect_identical(result$factor_metadata$source_type, c("param", "met", "poolinitcond"))
+    expect_true(all(result$X$param <= 24))
+
+    # input indices stay within available paths
+    expect_true(all(result$X$met >= 1 & result$X$met <= 3))
+    expect_true(all(result$X$poolinitcond >= 1 & result$X$poolinitcond <= 2))
+    expect_true(all(result$X$events >= 1 & result$X$events <= 3))
+
+    # factor metadata covers all independent factors
+    expect_true(all(
+      c("factor", "source_type", "source_tag") %in%
+        names(result$factor_metadata)
+    ))
+    expect_identical(
+      result$factor_metadata$source_type,
+      c("param", "met", "poolinitcond", "events")
+    )
   })
 })
 
@@ -116,46 +119,6 @@ test_that("Non-Sobol design generation remains row-for-row", {
     expect_named(result, "X")
     expect_equal(nrow(result$X), 5)
     expect_false("backend" %in% names(result))
-  })
-})
-
-test_that("Parameter-parented inputs inherit parameter ids in ordinary designs", {
-  withr::with_tempdir({
-    settings <- make_parameter_parent_settings(
-      getwd(),
-      paste0("ic", seq_len(8))
-    )
-
-    result <- generate_joint_ensemble_design(
-      settings = settings,
-      ensemble_size = 5,
-      sobol = FALSE
-    )
-
-    expect_equal(result$X$param, seq_len(5))
-    expect_equal(result$X$poolinitcond, result$X$param)
-  })
-})
-
-test_that("Sobol keeps parameter-parented child inputs in bounds", {
-  withr::with_tempdir({
-    set.seed(1)
-    settings <- make_parameter_parent_settings(
-      getwd(),
-      c("ic1", "ic2", "ic3")
-    )
-
-    result <- generate_joint_ensemble_design(
-      settings = settings,
-      ensemble_size = 4,
-      sobol = TRUE
-    )
-
-    expect_equal(nrow(result$X), 12)
-    expect_true(all(result$X$param >= 1))
-    expect_true(all(result$X$param <= 12))
-    expect_true(all(result$X$poolinitcond >= 1))
-    expect_true(all(result$X$poolinitcond <= 3))
   })
 })
 
@@ -181,6 +144,8 @@ test_that("Sobol regenerates parameter bank when any PFT bank is too short", {
       sobol = TRUE
     )
 
+    # only param factor here (no inputs in samplingspace)
+    # total = N * (k + 2) = 5 * (1 + 2) = 15
     expect_equal(captured$ensemble.size, 15)
     expect_identical(
       captured$posterior.files,
