@@ -27,40 +27,6 @@
 #'
 #' @author David LeBauer, Shawn Serbin, Ryan Kelly, Mike Dietze, Akash B V
 
-.trait_sample_bank_size <- function(trait.samples) {
-  if (is.null(trait.samples) || length(trait.samples) == 0) {
-    return(0L)
-  }
-
-  bank_sizes <- unlist(
-    lapply(trait.samples, function(pft_traits) {
-      if (is.null(pft_traits) || length(pft_traits) == 0) {
-        return(integer(0))
-      }
-
-      vapply(
-        pft_traits,
-        function(trait_values) {
-          if (is.null(trait_values) || length(trait_values) == 0) {
-            return(NA_integer_)
-          }
-
-          as.integer(length(trait_values))
-        },
-        integer(1)
-      )
-    }),
-    use.names = FALSE
-  )
-
-  bank_sizes <- bank_sizes[!is.na(bank_sizes) & bank_sizes > 0L]
-  if (length(bank_sizes) == 0) {
-    return(0L)
-  }
-
-  as.integer(min(bank_sizes))
-}
-
 run.write.configs <- function(settings, ensemble.size, input_design, write = TRUE,
                               posterior.files = rep(NA, length(settings$pfts)),
                               overwrite = TRUE) {
@@ -180,7 +146,7 @@ run.write.configs <- function(settings, ensemble.size, input_design, write = TRU
       if (any(is.na(trait_sample_indices)) || any(trait_sample_indices < 1L)) {
         PEcAn.logger::logger.error("input_design$param must contain positive integer indices")
       }
-      parameter_bank_size <- .trait_sample_bank_size(trait.samples)
+      parameter_bank_size <- PEcAn.uncertainty::trait_sample_bank_size(trait.samples)
       if (parameter_bank_size == 0L) {
         PEcAn.logger::logger.error(
           "samples.Rdata does not contain usable trait.samples required for input_design$param"
