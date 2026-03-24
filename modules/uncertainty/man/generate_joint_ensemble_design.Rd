@@ -2,10 +2,7 @@
 % Please edit documentation in R/generate_joint_ensemble_design.R
 \name{generate_joint_ensemble_design}
 \alias{generate_joint_ensemble_design}
-\title{Generate joint ensemble design for parameter sampling
-Creates a joint ensemble design that maintains parameter correlations across
-all sites in a multi-site run. This function generates sample indices that
-are shared across sites to ensure consistent parameter sampling.}
+\title{Generate joint ensemble design for parameter sampling}
 \usage{
 generate_joint_ensemble_design(settings, ensemble_size, sobol = FALSE)
 }
@@ -14,7 +11,8 @@ generate_joint_ensemble_design(settings, ensemble_size, sobol = FALSE)
 
 \item{ensemble_size}{Integer specifying the number of ensemble members.
 When \code{sobol = TRUE}, this is the Sobol base sample size \code{N}, not
-the expanded number of model runs.}
+the expanded number of model runs (which will be \code{N * (k + 2)} for
+\code{k} independent factors).}
 
 \item{sobol}{Logical, generate a variance-based Sobol design using
 \code{sensobol}.}
@@ -23,11 +21,19 @@ the expanded number of model runs.}
 A list with component \code{X}, a data frame design matrix
   describing PEcAn parameter and sampled-input indices. If \code{sobol = TRUE},
   the list also includes the metadata needed by
-  \code{\link{compute_sobol_indices}}.
+  \code{\link{compute_sobol_indices}}: \code{N}, \code{params},
+  \code{backend}, \code{matrices}, \code{first}, \code{total}, and
+  \code{factor_metadata}.
 }
 \description{
-Generate joint ensemble design for parameter sampling
 Creates a joint ensemble design that maintains parameter correlations across
 all sites in a multi-site run. This function generates sample indices that
 are shared across sites to ensure consistent parameter sampling.
+}
+\details{
+When \code{sobol = TRUE}, every input listed in
+\code{settings$ensemble$samplingspace} (other than \code{parameters})
+becomes an independent Sobol factor. This allows variance-based
+sensitivity analysis to attribute output variance to each source
+(parameters, met, initial conditions, events, etc.) independently.
 }
